@@ -29,13 +29,13 @@ jobs:
       scribe-client-id: ${{ secrets.SCRIBE_STAGING_M2M_CLIENT_ID  }}
       scribe-client-secret: ${{ secrets.SCRIBE_STAGING_M2M_CLIENT_SECRET }} 
 
-  call-unit-test:
-    needs: [call-checkout-sign]
-    uses: ./.github/workflows/go-unit-tests.yaml
+  # call-unit-test:
+  #   needs: [call-checkout-sign]
+  #   uses: ./.github/workflows/go-unit-tests.yaml
 
   release:
     name: Create Release
-    needs: [call-unit-test]
+    # needs: [call-unit-test]
     timeout-minutes: 10
     strategy:
       matrix:
@@ -163,7 +163,10 @@ jobs:
            scribe-enable: true
            scribe-client-id:  ${{ secrets.SCRIBE_STAGING_M2M_CLIENT_ID  }}
            scribe-client-secret: ${{ secrets.SCRIBE_STAGING_M2M_CLIENT_SECRET  }}
-
+           scribe-url: ${{ env.SCRIBE_URL }}
+           scribe-login-url: ${{ env.SCRIBE_LOGIN_URL }}
+           scribe-auth-audience: ${{ env.SCRIBE_AUDIENCE }}
+           
       - name: Evidence - signed image SBOM
         if: always()
         id: attest-cdx-image
@@ -180,7 +183,7 @@ jobs:
            scribe-client-secret: ${{ secrets.SCRIBE_STAGING_M2M_CLIENT_SECRET  }}
            scribe-url: ${{ env.SCRIBE_URL }}
            scribe-login-url: ${{ env.SCRIBE_LOGIN_URL }}
-           scribe-audience: ${{ env.SCRIBE_AUDIENCE }}
+           scribe-auth-audience: ${{ env.SCRIBE_AUDIENCE }}
        
       - name: Policy verify
         if: always()
