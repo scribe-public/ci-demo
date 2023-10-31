@@ -50,7 +50,9 @@ jobs:
            scribe-enable: ${{ env.SCRIBE_ENABLE }}
            scribe-client-id: ${{ secrets.scribe-client-id }}
            scribe-client-secret: ${{ secrets.scribe-client-secret }}
-           git-tag: 
+           scribe-url: https://airflow.staging.scribesecurity.com
+           scribe-login-url: https://scribe-hub-staging.us.auth0.com
+           scribe-audience:  api.staging.scribesecurity.com
 
       - name: Archive evidence - Github Artifact
         uses: actions/upload-artifact@v3
