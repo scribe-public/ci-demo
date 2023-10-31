@@ -178,7 +178,7 @@ jobs:
 
       - name: Policy verify
         if: always()
-        id: attest-cdx-image
+        id: policy-verify
         uses: scribe-security/action-verify@demo
         with:
            target: ${{ env.KO_DOCKER_REPO }}/ci-demo-app:${{ env.KO_TAG }}
