@@ -5,6 +5,7 @@ on:
   push:
     tags:
       - "v*"
+  pull_request:
     # branches: ["main", "master", "marsh"]
 
   workflow_dispatch:
@@ -16,67 +17,70 @@ concurrency:
 
 env:
   KO_DOCKER_REPO: scribesecuriy.jfrog.io/scribe-docker-public-local
-
+  SCRIBE_URL: "https://airflow.staging.scribesecurity.com"
+  SCRIBE_LOGIN_URL: "https://scribe-hub-staging.us.auth0.com"
+  SCRIBE_AUDIENCE: "api.staging.scribesecurity.com"
+ 
 jobs:
   # SIGN - checkout sign and upload cache to Github artifact.
   call-checkout-sign:
     uses: ./.github/workflows/reusable-checkout-sign.yaml
     secrets:
-      scribe-client-id: ${{ secrets.SCRIBE_PROD_M2M_CLIENT_ID  }}
-      scribe-client-secret: ${{ secrets.SCRIBE_PROD_M2M_CLIENT_SECRET }} 
+      scribe-client-id: ${{ secrets.SCRIBE_STAGING_M2M_CLIENT_ID  }}
+      scribe-client-secret: ${{ secrets.SCRIBE_STAGING_M2M_CLIENT_SECRET }} 
 
-  call-unit-test:
-    needs: [call-checkout-sign]
-    uses: ./.github/workflows/go-unit-tests.yaml
+  # call-unit-test:
+  #   needs: [call-checkout-sign]
+  #   uses: ./.github/workflows/go-unit-tests.yaml
 
-  release:
-    name: Create Release
-    needs: [call-unit-test]
-    timeout-minutes: 10
-    strategy:
-      matrix:
-        go-version: ["1.17"]
-        platform: ["ubuntu-latest"]
-    runs-on: ${{ matrix.platform }}
-    permissions:
-      contents: write # To write to releases write is needed ....:(
-      id-token: write
+  # release:
+  #   name: Create Release
+  #   # needs: [call-unit-test]
+  #   timeout-minutes: 10
+  #   strategy:
+  #     matrix:
+  #       go-version: ["1.17"]
+  #       platform: ["ubuntu-latest"]
+  #   runs-on: ${{ matrix.platform }}
+  #   permissions:
+  #     contents: write # To write to releases write is needed ....:(
+  #     id-token: write
 
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@v3
+  #       with:
+  #         fetch-depth: 0
 
-      - name: debug 
-        if: always() 
-        run: |
-          git status
+  #     - name: debug 
+  #       if: always() 
+  #       run: |
+  #         git status
 
-      - name: Set up Go
-        uses: actions/setup-go@v4
-        with:
-          go-version: ${{ matrix.go-version }}
+  #     - name: Set up Go
+  #       uses: actions/setup-go@v4
+  #       with:
+  #         go-version: ${{ matrix.go-version }}
            
-      - name: Create CHANGELOG for Release
-        if: ${{ always() }}
-        run: |
-          # build from vendor
-          go build -mod=vendor github.com/git-chglog/git-chglog/cmd/git-chglog
+  #     - name: Create CHANGELOG for Release
+  #       if: ${{ always() }}
+  #       run: |
+  #         # build from vendor
+  #         go build -mod=vendor github.com/git-chglog/git-chglog/cmd/git-chglog
 
-          # generate CHANGELOG for this Github release tag only
-          ./git-chglog -o RELEASE_CHANGELOG.md $(basename "${{ github.ref }}" )
+  #         # generate CHANGELOG for this Github release tag only
+  #         ./git-chglog -o RELEASE_CHANGELOG.md $(basename "${{ github.ref }}" )
 
-      - name: GoReleaser
-        if: ${{ always() }}
-        uses: goreleaser/goreleaser-action@v4
-        with:
-          args: release --rm-dist --release-notes RELEASE_CHANGELOG.md
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  #     - name: GoReleaser
+  #       if: ${{ always() }}
+  #       uses: goreleaser/goreleaser-action@v4
+  #       with:
+  #         args: release --rm-dist --release-notes RELEASE_CHANGELOG.md
+  #       env:
+  #         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   images:
-    needs: release
+    # needs: release
     # needs: [call-checkout-sign]
     if: ${{ always() }}
     name: Release ko Artifact and Docker Image
@@ -109,7 +113,7 @@ jobs:
         with:
           registry: ${{ env.ARTIFACTORY_URL }}
           username: ${{ secrets.RELEASE_ARTIFACTORY_USERNAME }}
-          password: ${{ secrets.RELEASE_ARTIFACTORY_PASSWORD }}
+          password: ${{ secrets.RELEASE_ARTIFACTORY_TOKEN }}
    
 
       - name: Setup ko
@@ -139,6 +143,30 @@ jobs:
           ko resolve --platform=all --tags ${KO_TAG},${KO_COMMIT},latest -BRf config > release.yaml
           ko publish --tags ${KO_TAG},${KO_COMMIT},latest github.com/scribe-security/ci-demo-app --push=false -B --tarball build_image.tar
 
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ' ${{ env.KO_DOCKER_REPO }}/ci-demo-app:${{ env.KO_TAG }}'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Attach trivy scan Evidence
+        if: always()
+        id: attest-trivy-image
+        uses: scribe-security/action-bom@dev
+        with:
+           target: trivy-results.sarif
+           verbose: 2
+           format: attest-generic
+           product-key: ${{ env.GITHUB_REPOSITORY }}
+           product-version: ${{ env.KO_TAG }}
+           scribe-enable: true
+           scribe-client-id:  ${{ secrets.SCRIBE_STAGING_M2M_CLIENT_ID  }}
+           scribe-client-secret: ${{ secrets.SCRIBE_STAGING_M2M_CLIENT_SECRET  }}
+           scribe-url: ${{ env.SCRIBE_URL }}
+           scribe-login-url: ${{ env.SCRIBE_LOGIN_URL }}
+           scribe-auth-audience: ${{ env.SCRIBE_AUDIENCE }}
+
       - name: Evidence - signed image SBOM
         if: always()
         id: attest-cdx-image
@@ -146,20 +174,43 @@ jobs:
         with:
            target: ${{ env.KO_DOCKER_REPO }}/ci-demo-app:${{ env.KO_TAG }}
           #  target: ${{ env.KO_DOCKER_REPO }}/ci-demo-app:latest
-           verbose: 1
+           verbose: 2
            format: attest-slsa
            product-key: ${{ env.GITHUB_REPOSITORY }}
+           product-version: ${{ env.KO_TAG }}
            scribe-enable: true
-           scribe-client-id:  ${{ secrets.SCRIBE_PROD_M2M_CLIENT_ID  }}
-           scribe-client-secret: ${{ secrets.SCRIBE_PROD_M2M_CLIENT_SECRET  }}
-
-      - name: Archive evidence - Github Artifact
-        uses: actions/upload-artifact@v3
+           scribe-client-id:  ${{ secrets.SCRIBE_STAGING_M2M_CLIENT_ID  }}
+           scribe-client-secret: ${{ secrets.SCRIBE_STAGING_M2M_CLIENT_SECRET  }}
+           scribe-url: ${{ env.SCRIBE_URL }}
+           scribe-login-url: ${{ env.SCRIBE_LOGIN_URL }}
+           scribe-auth-audience: ${{ env.SCRIBE_AUDIENCE }}
+       
+      - name: Policy verify
+        if: always()
+        id: policy-verify
+        uses: scribe-security/action-verify@demo
         with:
-          name: image-evidence
-          path: |
-            ${{ steps.attest-cdx-image.outputs.OUTPUT_PATH }}
-          retention-days: 1
+           target: ${{ env.KO_DOCKER_REPO }}/ci-demo-app:${{ env.KO_TAG }}
+          #  target: ${{ env.KO_DOCKER_REPO }}/ci-demo-app:latest
+           verbose: 2
+           input-format: attest-slsa
+           product-key: ${{ env.GITHUB_REPOSITORY }}
+           product-version: ${{ env.KO_TAG }}
+           push: true
+           scribe-enable: true
+           scribe-client-id:  ${{ secrets.SCRIBE_STAGING_M2M_CLIENT_ID  }}
+           scribe-client-secret: ${{ secrets.SCRIBE_STAGING_M2M_CLIENT_SECRET  }}
+           scribe-url: ${{ env.SCRIBE_URL }}
+           scribe-login-url: ${{ env.SCRIBE_LOGIN_URL }}
+           scribe-audience: ${{ env.SCRIBE_AUDIENCE }}
+       
+      # - name: Archive evidence - Github Artifact
+      #   uses: actions/upload-artifact@v3
+      #   with:
+      #     name: image-evidence
+      #     path: |
+      #       ${{ steps.attest-cdx-image.outputs.OUTPUT_PATH }}
+      #     retention-days: 1
 
       - name: Release-Github
         uses: softprops/action-gh-release@v1
@@ -200,5 +251,5 @@ jobs:
       target: ${{ needs.images.outputs.image }}
       # target: scribesecuriy.jfrog.io/scribe-docker-public-local/ci-demo-app:latest
     secrets:
-      scribe-client-id: ${{ secrets.SCRIBE_PROD_M2M_CLIENT_ID  }}
-      scribe-client-secret: ${{ secrets.SCRIBE_PROD_M2M_CLIENT_SECRET }} 
+      scribe-client-id: ${{ secrets.SCRIBE_STAGING_M2M_CLIENT_ID  }}
+      scribe-client-secret: ${{ secrets.SCRIBE_STAGING_M2M_CLIENT_SECRET }} 
