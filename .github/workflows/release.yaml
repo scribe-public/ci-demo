@@ -113,7 +113,7 @@ jobs:
         with:
           registry: ${{ env.ARTIFACTORY_URL }}
           username: ${{ secrets.RELEASE_ARTIFACTORY_USERNAME }}
-          password: ${{ secrets.RELEASE_ARTIFACTORY_PASSWORD }}
+          password: ${{ secrets.RELEASE_ARTIFACTORY_TOKEN }}
    
 
       - name: Setup ko
